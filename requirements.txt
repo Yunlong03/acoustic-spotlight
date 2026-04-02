@@ -1,0 +1,3 @@
+— dependencies (minimal for now, expand Day 2):
+```
+gradio
