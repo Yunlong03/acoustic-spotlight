@@ -1,1 +1,5 @@
 gradio
+scipy
+matplotlib
+soundfile
+numpy
