@@ -3,3 +3,6 @@ scipy
 matplotlib
 soundfile
 numpy
+speechbrain
+torch
+torchaudio

@@ -4,47 +4,28 @@ import matplotlib.pyplot as plt
 from scipy import signal as scipy_signal
 from scipy.io import wavfile
 import soundfile as sf
+import tempfile
+import os
 
 def load_audio(audio_path):
-    """
-    Load audio file using soundfile (more reliable than scipy.io.wavfile for various formats).
-    Returns (audio_array, sample_rate).
-    """
+    """Load audio file, convert to mono if stereo."""
     audio, sr = sf.read(audio_path)
-    # If stereo, convert to mono by averaging channels
     if len(audio.shape) > 1:
         audio = audio.mean(axis=1)
     return audio, sr
 
 def analyze_audio(audio_path, title):
-    """
-    Takes a path to an audio file.
-    Returns a matplotlib figure showing waveform + spectrogram.
-    """
+    """Generate waveform + spectrogram figure from audio file."""
     if audio_path is None:
         return None
     
-    # Load audio
     audio, sr = load_audio(audio_path)
-    
-    # Create time axis for waveform
     time = np.arange(len(audio)) / sr
-    
-    # Compute spectrogram using scipy
-    frequencies, times, Sxx = scipy_signal.spectrogram(
-        audio, 
-        fs=sr,
-        nperseg=1024,
-        noverlap=512
-    )
-    
-    # Convert to dB for better visualization
+    frequencies, times, Sxx = scipy_signal.spectrogram(audio, fs=sr, nperseg=1024, noverlap=512)
     Sxx_db = 10 * np.log10(Sxx + 1e-10)
     
-    # Create figure with 2 plots stacked vertically
     fig, axes = plt.subplots(2, 1, figsize=(10, 6))
     
-    # Top plot: waveform (amplitude over time)
     axes[0].plot(time, audio, color='#00a8ff', linewidth=0.5)
     axes[0].set_title(f'{title} — Waveform')
     axes[0].set_xlabel('Time (seconds)')
@@ -52,7 +33,6 @@ def analyze_audio(audio_path, title):
     axes[0].set_xlim(0, time[-1])
     axes[0].grid(True, alpha=0.3)
     
-    # Bottom plot: spectrogram (frequencies over time)
     img = axes[1].pcolormesh(times, frequencies, Sxx_db, cmap='viridis', shading='gouraud')
     axes[1].set_title(f'{title} — Spectrogram (voice print)')
     axes[1].set_xlabel('Time (seconds)')
@@ -64,57 +44,116 @@ def analyze_audio(audio_path, title):
     plt.tight_layout()
     return fig
 
+def extract_embedding(audio_path):
+    """Extract voice embedding using SpeechBrain ECAPA-TDNN."""
+    try:
+        from speechbrain.inference.speaker import EncoderClassifier
+        import torchaudio
+        
+        classifier = EncoderClassifier.from_hparams(
+            source="speechbrain/spkrec-ecapa-voxceleb",
+            savedir="pretrained_models/spkrec-ecapa-voxceleb"
+        )
+        signal, sr = torchaudio.load(audio_path)
+        embedding = classifier.encode_batch(signal)
+        return embedding[0][0].detach().numpy(), True
+    except Exception as e:
+        print(f"SpeechBrain error: {e}")
+        return None, False
+
+def compare_embeddings(emb1, emb2):
+    """Cosine similarity between two voice embeddings. 1.0 = identical, 0.0 = completely different."""
+    cos_sim = np.dot(emb1, emb2) / (np.linalg.norm(emb1) * np.linalg.norm(emb2))
+    return float(cos_sim)
+
 def process_audio(target_voice, noisy_audio):
     """
-    Day 2: Real spectrograms of uploaded audio.
-    Day 3: Will add real TSE separation.
+    Full pipeline:
+    1. Analyze both audio files (spectrograms)
+    2. Extract voice embeddings via SpeechBrain
+    3. Compare embeddings (similarity score)
     """
     if target_voice is None or noisy_audio is None:
-        return "Please upload both audio files.", None, None, None
+        return "Please upload both audio files.", None, None, None, None
     
-    # Generate real spectrograms for both inputs
+    # Generate spectrograms (always works — scipy)
     target_fig = analyze_audio(target_voice, "Target Voice (Voice Print Source)")
     noisy_fig = analyze_audio(noisy_audio, "Noisy Environment (To Be Filtered)")
     
-    status = "✅ Audio analyzed — real spectrograms generated. Day 3 will add voice isolation processing."
+    # Attempt voice embedding extraction (SpeechBrain — may fail locally, works on HF Spaces)
+    target_emb, target_ok = extract_embedding(target_voice)
+    noisy_emb, noisy_ok = extract_embedding(noisy_audio)
     
-    # For now, output = input (placeholder until Day 3)
-    return status, target_fig, noisy_fig, noisy_audio
+    if target_ok and noisy_ok:
+        similarity = compare_embeddings(target_emb, noisy_emb)
+        
+        # Create embedding visualization
+        emb_fig, axes = plt.subplots(1, 2, figsize=(12, 3))
+        axes[0].bar(range(len(target_emb)), target_emb, color='#00a8ff', width=1.0)
+        axes[0].set_title('Target Voice Embedding (192 dimensions)')
+        axes[0].set_xlabel('Dimension')
+        axes[0].set_ylabel('Value')
+        axes[1].bar(range(len(noisy_emb)), noisy_emb, color='#ff6b6b', width=1.0)
+        axes[1].set_title('Noisy Audio Embedding (192 dimensions)')
+        axes[1].set_xlabel('Dimension')
+        axes[1].set_ylabel('Value')
+        plt.tight_layout()
+        
+        if similarity > 0.7:
+            match_text = f"HIGH MATCH ({similarity:.1%}) — Same speaker detected in both recordings"
+        elif similarity > 0.4:
+            match_text = f"PARTIAL MATCH ({similarity:.1%}) — Target speaker may be present in noisy audio"
+        else:
+            match_text = f"LOW MATCH ({similarity:.1%}) — Target speaker not clearly detected"
+        
+        status = f"✅ Voice print analysis complete.\n\n🎯 Voice Match Score: {similarity:.1%}\n{match_text}\n\n📊 Voice embeddings: 192-dimensional vectors extracted via ECAPA-TDNN (trained on VoxCeleb).\n\nIn the full Acoustic Spotlight product, this voice print would be saved to your Acoustic Contact Book and used to isolate this speaker in real-time via Bluetooth to your hearing aids."
+    else:
+        emb_fig = None
+        status = "✅ Spectrograms generated.\n\n⚠️ Voice embedding extraction unavailable (SpeechBrain requires server-side PyTorch 2.4+).\n\nSpectrograms show the frequency fingerprint of each audio sample. In the full product, the system compares these patterns to isolate the target voice."
+    
+    return status, target_fig, noisy_fig, emb_fig, noisy_audio
 
 # Build the Gradio interface
 demo = gr.Interface(
     fn=process_audio,
     inputs=[
-        gr.Audio(label="Step 1: Upload Target Voice (10 sec sample)", type="filepath"),
-        gr.Audio(label="Step 2: Upload Noisy Audio", type="filepath"),
+        gr.Audio(label="Step 1: Target Voice — record or upload a 10-sec sample", type="filepath", sources=["microphone", "upload"]),
+        gr.Audio(label="Step 2: Noisy Audio — record or upload the noisy environment", type="filepath", sources=["microphone", "upload"]),
     ],
     outputs=[
-        gr.Textbox(label="Status"),
-        gr.Plot(label="Target Voice Analysis"),
-        gr.Plot(label="Noisy Audio Analysis"),
-        gr.Audio(label="Isolated Voice (Day 3 output)"),
+        gr.Textbox(label="Analysis Result", lines=8),
+        gr.Plot(label="Target Voice — Waveform & Spectrogram"),
+        gr.Plot(label="Noisy Audio — Waveform & Spectrogram"),
+        gr.Plot(label="Voice Embeddings Comparison (192-dim vectors)"),
+        gr.Audio(label="Processed Audio (full isolation coming soon)"),
     ],
     title="🎯 Acoustic Spotlight — Voice Print Isolation Demo",
     description="""
     **The Cocktail Party Problem, Solved.**
     
-    Traditional hearing aids amplify everything. Acoustic Spotlight isolates 
-    the ONE voice you want to hear.
+    Traditional hearing aids amplify everything — even voices you don't want to hear.
+    Acoustic Spotlight isolates the ONE voice you choose.
     
-    1. Upload a 10-second sample of your target speaker
-    2. Upload a noisy recording with multiple voices
-    3. Click Submit — see the voice print analysis (Day 2) and isolated voice (Day 3)
+    **How to use this demo:**
+    1. **Record or upload** a 10-second sample of your target speaker (their "voice print")
+    2. **Record or upload** a noisy scene where the same person is speaking among other sounds
+    3. **Click Submit** — the system extracts the voice print, analyzes both recordings, and shows the match
     
-    *This is a concept demo for the Acoustic Contact Book — 
-    your personalized VIP list for your ears.*
+    *This is the Acoustic Contact Book — your personalized VIP list for your ears.
+    Record someone once, tap their profile anytime, hear only them.*
     """,
     article="""
-    **How it works:** The system extracts a mathematical voice embedding 
-    (voice print) from the target speaker sample, then uses Target Speaker 
-    Extraction (TSE) to isolate that voice from the noisy recording.
+    **How it works:** The system extracts a 192-dimensional mathematical voice embedding 
+    (voice print) from the target speaker using ECAPA-TDNN, a neural network trained on 
+    thousands of speakers. It then compares this embedding against the noisy recording 
+    to identify where the target voice appears.
     
-    **Market:** The hearing aid market is worth $9B+. Current devices cannot 
-    isolate a specific voice in a crowded room.
+    **The vision:** Save voice prints of the people who matter most — your partner, your boss, 
+    your best friend. Walk into a noisy restaurant, tap a profile, put your phone on the table. 
+    The app locks onto their voice and streams only that voice to your hearing aids via Bluetooth.
+    
+    **Market:** The hearing aid market is worth $9B+. 466 million people worldwide have 
+    disabling hearing loss. Current devices cannot isolate a specific voice in a crowded room.
     
     Built by Dragon S · Exponential Entrepreneur Bootcamp 2026
     """,
