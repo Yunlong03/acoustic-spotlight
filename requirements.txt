@@ -5,4 +5,3 @@ soundfile
 numpy
 speechbrain
 torch
-torchaudio

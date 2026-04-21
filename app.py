@@ -6,6 +6,7 @@ from scipy.io import wavfile
 import soundfile as sf
 import tempfile
 import os
+import functools
 
 def load_audio(audio_path):
     """Load audio file, convert to mono if stereo."""
@@ -44,25 +45,52 @@ def analyze_audio(audio_path, title):
     plt.tight_layout()
     return fig
 
+import functools
+
+@functools.lru_cache(maxsize=1)
+def load_speechbrain_model():
+    """Load SpeechBrain model once, cache in memory."""
+    from speechbrain.inference.speaker import EncoderClassifier
+    print("Loading SpeechBrain ECAPA-TDNN model...")
+    classifier = EncoderClassifier.from_hparams(
+        source="speechbrain/spkrec-ecapa-voxceleb",
+        savedir="pretrained_models/spkrec-ecapa-voxceleb"
+    )
+    print("Model loaded successfully.")
+    return classifier
+
 def extract_embedding(audio_path):
     """Extract voice embedding using SpeechBrain ECAPA-TDNN."""
     try:
-        from speechbrain.inference.speaker import EncoderClassifier
-        import torchaudio
         import torch
         
         print(f"PyTorch version: {torch.__version__}")
-        print(f"Loading SpeechBrain model...")
         
-        classifier = EncoderClassifier.from_hparams(
-            source="speechbrain/spkrec-ecapa-voxceleb",
-            savedir="pretrained_models/spkrec-ecapa-voxceleb"
-        )
-        print(f"Model loaded. Loading audio: {audio_path}")
+        # Load audio using soundfile (not torchaudio — avoids TorchCodec dependency)
+        audio, sr = load_audio(audio_path)
         
-        signal, sr = torchaudio.load(audio_path)
-        print(f"Audio loaded: {signal.shape}, sr={sr}")
+        # Resample to 16kHz if needed (SpeechBrain expects 16kHz)
+        if sr != 16000:
+            from scipy.signal import resample
+            num_samples_new = int(len(audio) * 16000 / sr)
+            audio = resample(audio, num_samples_new)
+            sr = 16000
+            print(f"Resampled to 16kHz: {len(audio)} samples")
         
+        # Trim to 30 seconds max to avoid long processing
+        max_samples = 30 * sr
+        if len(audio) > max_samples:
+            audio = audio[:max_samples]
+            print(f"Trimmed to 30 seconds")
+        
+        # Convert to torch tensor with correct shape (1, num_samples)
+        signal = torch.tensor(audio, dtype=torch.float32).unsqueeze(0)
+        print(f"Signal tensor shape: {signal.shape}")
+        
+        # Load model (cached after first call)
+        classifier = load_speechbrain_model()
+        
+        # Extract embedding
         embedding = classifier.encode_batch(signal)
         print(f"Embedding extracted: {embedding.shape}")
         
