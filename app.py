@@ -47,19 +47,30 @@ def analyze_audio(audio_path, title):
 def extract_embedding(audio_path):
     """Extract voice embedding using SpeechBrain ECAPA-TDNN."""
     try:
-        from speechbrain.pretrained import EncoderClassifier
+        from speechbrain.inference.speaker import EncoderClassifier
         import torchaudio
+        import torch
+        
+        print(f"PyTorch version: {torch.__version__}")
+        print(f"Loading SpeechBrain model...")
         
         classifier = EncoderClassifier.from_hparams(
             source="speechbrain/spkrec-ecapa-voxceleb",
             savedir="pretrained_models/spkrec-ecapa-voxceleb"
         )
+        print(f"Model loaded. Loading audio: {audio_path}")
+        
         signal, sr = torchaudio.load(audio_path)
+        print(f"Audio loaded: {signal.shape}, sr={sr}")
+        
         embedding = classifier.encode_batch(signal)
-        return embedding[0][0].detach().numpy(), True
+        print(f"Embedding extracted: {embedding.shape}")
+        
+        return embedding[0][0].detach().numpy(), True, ""
     except Exception as e:
-        print(f"SpeechBrain error: {e}")
-        return None, False
+        error_msg = f"{type(e).__name__}: {str(e)}"
+        print(f"SpeechBrain error: {error_msg}")
+        return None, False, error_msg
 
 def compare_embeddings(emb1, emb2):
     """Cosine similarity between two voice embeddings. 1.0 = identical, 0.0 = completely different."""
@@ -81,8 +92,8 @@ def process_audio(target_voice, noisy_audio):
     noisy_fig = analyze_audio(noisy_audio, "Noisy Environment (To Be Filtered)")
     
     # Attempt voice embedding extraction (SpeechBrain — may fail locally, works on HF Spaces)
-    target_emb, target_ok = extract_embedding(target_voice)
-    noisy_emb, noisy_ok = extract_embedding(noisy_audio)
+    target_emb, target_ok, target_err = extract_embedding(target_voice)
+    noisy_emb, noisy_ok, noisy_err = extract_embedding(noisy_audio)
     
     if target_ok and noisy_ok:
         similarity = compare_embeddings(target_emb, noisy_emb)
@@ -109,7 +120,7 @@ def process_audio(target_voice, noisy_audio):
         status = f"✅ Voice print analysis complete.\n\n🎯 Voice Match Score: {similarity:.1%}\n{match_text}\n\n📊 Voice embeddings: 192-dimensional vectors extracted via ECAPA-TDNN (trained on VoxCeleb).\n\nIn the full Acoustic Spotlight product, this voice print would be saved to your Acoustic Contact Book and used to isolate this speaker in real-time via Bluetooth to your hearing aids."
     else:
         emb_fig = None
-        status = "✅ Spectrograms generated.\n\n⚠️ Voice embedding extraction unavailable (SpeechBrain requires server-side PyTorch 2.4+).\n\nSpectrograms show the frequency fingerprint of each audio sample. In the full product, the system compares these patterns to isolate the target voice."
+        status = f"✅ Spectrograms generated.\n\n⚠️ Voice embedding extraction failed.\nTarget error: {target_err}\nNoisy error: {noisy_err}\n\nThis diagnostic info will help debug the issue."
     
     return status, target_fig, noisy_fig, emb_fig, noisy_audio
 

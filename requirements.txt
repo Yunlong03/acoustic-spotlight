@@ -3,6 +3,6 @@ scipy
 matplotlib
 soundfile
 numpy
-speechbrain==1.0.2
-torch==2.1.2
-torchaudio==2.1.2
+speechbrain
+torch
+torchaudio
