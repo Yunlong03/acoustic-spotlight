@@ -47,7 +47,7 @@ def analyze_audio(audio_path, title):
 def extract_embedding(audio_path):
     """Extract voice embedding using SpeechBrain ECAPA-TDNN."""
     try:
-        from speechbrain.inference.speaker import EncoderClassifier
+        from speechbrain.pretrained import EncoderClassifier
         import torchaudio
         
         classifier = EncoderClassifier.from_hparams(
