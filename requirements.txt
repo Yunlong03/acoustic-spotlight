@@ -6,3 +6,4 @@ soundfile
 numpy
 speechbrain
 torch
+datasets
