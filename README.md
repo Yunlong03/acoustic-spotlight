@@ -1,3 +1,4 @@
+---
 title: Acoustic Spotlight
 emoji: 🎯
 colorFrom: blue
