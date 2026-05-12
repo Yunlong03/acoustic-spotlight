@@ -1,5 +1,13 @@
-# 🎯 Acoustic Spotlight
-
+title: Acoustic Spotlight
+emoji: 🎯
+colorFrom: blue
+colorTo: cyan
+sdk: gradio
+sdk_version: "5.23.0"
+app_file: app.py
+pinned: false
+license: mit
+---
 **Your Acoustic Contact Book — a VIP list for your ears.**
 
 Traditional hearing aids amplify everything. Acoustic Spotlight isolates the one voice you choose.
