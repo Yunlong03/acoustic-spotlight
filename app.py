@@ -307,8 +307,10 @@ def process_audio(noisy_audio, target_voice, request: gr.Request = None):
         match_line = f"⚠️ Voice embedding unavailable: {t_err or n_err}"
 
     # 3. Target Speaker Extraction via SoloSpeech
+    try:
         extracted_path, tse_ok, tse_err = extract_voice_solospeech(noisy_audio, target_voice, request)
-
+    except Exception as e:
+        extracted_path, tse_ok, tse_err = None, False, f"TSE call failed: {str(e)}"
     if tse_ok:
         extracted_fig = make_spectrogram(extracted_path, "🎧 After — Extracted Voice", '#4ecdc4')
         status = (
