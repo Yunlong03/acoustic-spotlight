@@ -251,11 +251,24 @@ def create_embedding_plot(target_emb, noisy_emb, similarity):
 
 # ─── SOLOSPEECH TSE API ───
 
-def extract_voice_solospeech(noisy_path, target_path):
+def extract_voice_solospeech(noisy_path, target_path, request=None):
     """Call SoloSpeech for real target speaker extraction."""
     try:
         from gradio_client import Client, handle_file
-        client = Client("OpenSound/SoloSpeech")
+        import os
+        
+        # Authenticate to get higher ZeroGPU quota
+        # Method 1: Forward user's browser token (best)
+        headers = {}
+        if request is not None:
+            ip_token = request.headers.get('x-ip-token', '')
+            if ip_token:
+                headers = {"x-ip-token": ip_token}
+        
+        # Method 2: Use Space's HF token as fallback
+        hf_token = os.environ.get("HF_TOKEN", None)
+        
+        client = Client("OpenSound/SoloSpeech", hf_token=hf_token, headers=headers)
         result = client.predict(
             test_wav=handle_file(noisy_path),
             enroll_wav=handle_file(target_path),
@@ -267,7 +280,7 @@ def extract_voice_solospeech(noisy_path, target_path):
 
 # ─── MAIN PROCESSING ───
 
-def process_audio(noisy_audio, target_voice):
+def process_audio(noisy_audio, target_voice, request: gr.Request = None):
     """Full pipeline: spectrograms + embeddings + SoloSpeech extraction."""
     if noisy_audio is None or target_voice is None:
         return "⬆️ Record or upload both audio samples, then click Submit.", None, None, None, None, None, None
@@ -294,7 +307,7 @@ def process_audio(noisy_audio, target_voice):
         match_line = f"⚠️ Voice embedding unavailable: {t_err or n_err}"
 
     # 3. Target Speaker Extraction via SoloSpeech
-    extracted_path, tse_ok, tse_err = extract_voice_solospeech(noisy_audio, target_voice)
+        extracted_path, tse_ok, tse_err = extract_voice_solospeech(noisy_audio, target_voice, request)
 
     if tse_ok:
         extracted_fig = make_spectrogram(extracted_path, "🎧 After — Extracted Voice", '#4ecdc4')
