@@ -251,24 +251,27 @@ def create_embedding_plot(target_emb, noisy_emb, similarity):
 
 # ─── SOLOSPEECH TSE API ───
 
-def extract_voice_solospeech(noisy_path, target_path, request=None):
+def create_solospeech_client(request: gr.Request):
+    """Create authenticated SoloSpeech client when user loads the page."""
+    from gradio_client import Client
+    import os
+    
+    headers = {}
+    try:
+        x_ip_token = request.headers.get('x-ip-token', '')
+        if x_ip_token:
+            headers = {"x-ip-token": x_ip_token}
+    except:
+        pass
+    
+    hf_token = os.environ.get("HF_TOKEN", None)
+    client = Client("OpenSound/SoloSpeech", hf_token=hf_token, headers=headers)
+    return client
+
+def extract_voice_solospeech(noisy_path, target_path, client):
     """Call SoloSpeech for real target speaker extraction."""
     try:
-        from gradio_client import Client, handle_file
-        import os
-        
-        # Authenticate to get higher ZeroGPU quota
-        # Method 1: Forward user's browser token (best)
-        headers = {}
-        if request is not None:
-            ip_token = request.headers.get('x-ip-token', '')
-            if ip_token:
-                headers = {"x-ip-token": ip_token}
-        
-        # Method 2: Use Space's HF token as fallback
-        hf_token = os.environ.get("HF_TOKEN", None)
-        
-        client = Client("OpenSound/SoloSpeech", hf_token=hf_token, headers=headers)
+        from gradio_client import handle_file
         result = client.predict(
             test_wav=handle_file(noisy_path),
             enroll_wav=handle_file(target_path),
@@ -280,7 +283,7 @@ def extract_voice_solospeech(noisy_path, target_path, request=None):
 
 # ─── MAIN PROCESSING ───
 
-def process_audio(noisy_audio, target_voice, request: gr.Request = None):
+def process_audio(noisy_audio, target_voice, solospeech_client):
     """Full pipeline: spectrograms + embeddings + SoloSpeech extraction."""
     if noisy_audio is None or target_voice is None:
         return "⬆️ Record or upload both audio samples, then click Submit.", None, None, None, None, None, None
@@ -308,7 +311,7 @@ def process_audio(noisy_audio, target_voice, request: gr.Request = None):
 
     # 3. Target Speaker Extraction via SoloSpeech
     try:
-        extracted_path, tse_ok, tse_err = extract_voice_solospeech(noisy_audio, target_voice, request)
+        extracted_path, tse_ok, tse_err = extract_voice_solospeech(noisy_audio, target_voice, solospeech_client)
     except Exception as e:
         extracted_path, tse_ok, tse_err = None, False, f"TSE call failed: {str(e)}"
     if tse_ok:
@@ -340,6 +343,7 @@ def process_audio(noisy_audio, target_voice, request: gr.Request = None):
 # ─── GRADIO UI ───
 
 with gr.Blocks(title="Acoustic Spotlight", theme=gr.themes.Base(primary_hue="teal", neutral_hue="slate")) as demo:
+    solospeech_client = gr.State()
 
     gr.Markdown("""
     # 🎯 Acoustic Spotlight
@@ -420,9 +424,11 @@ with gr.Blocks(title="Acoustic Spotlight", theme=gr.themes.Base(primary_hue="tea
 
     submit_btn.click(
         fn=process_audio,
-        inputs=[noisy_input, target_input],
+        inputs=[noisy_input, target_input, solospeech_client],
         outputs=[status_output, target_plot, noisy_plot, embedding_plot, before_audio, after_audio, extracted_plot]
     )
+    
+    demo.load(create_solospeech_client, None, solospeech_client)
 
     gr.Markdown("""
     ---
@@ -449,4 +455,4 @@ with gr.Blocks(title="Acoustic Spotlight", theme=gr.themes.Base(primary_hue="tea
     """)
 
 if __name__ == "__main__":
-    demo.launch()
+    demo.launch(ssr_mode=False)
